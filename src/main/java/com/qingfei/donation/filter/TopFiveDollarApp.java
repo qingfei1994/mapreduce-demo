@@ -11,20 +11,25 @@ import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.input.SequenceFileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.TreeMap;
 
 /**
+ * hadoop jar donor.jar com.qingfei.donation.filter.TopFiveDollarApp /test/donation.seqfile /test/top_five_dollar
  * Created by ASUS on 4/23/2018.
  */
 public class TopFiveDollarApp {
+    private static final Logger logger = LoggerFactory.getLogger(TopFiveDollarApp.class);
     public static void main(String[] args) throws Exception {
         Job job = Job.getInstance(new Configuration(),"Top 5 Dollar Amount in Donation");
         job.setJarByClass(TopFiveDollarApp.class);
         job.setInputFormatClass(SequenceFileInputFormat.class);
         job.setMapperClass(TopFiveMapper.class);
-        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputKeyClass(NullWritable.class);
         job.setMapOutputValueClass(DonationWritable.class);
         job.setReducerClass(TopFiveReducer.class);
         job.setOutputKeyClass(NullWritable.class);
@@ -43,17 +48,34 @@ public class TopFiveDollarApp {
         private TreeMap<Float,DonationWritable> topFiveDollar = new TreeMap<Float, DonationWritable>();
         @Override
         protected void map(Text key, DonationWritable value, Context context) throws IOException, InterruptedException {
-            topFiveDollar.put(value.dollarAmount,value);
+            DonationWritable donationWritable = new DonationWritable();
+            donationWritable.donationId = value.donationId;
+            donationWritable.donateByTeacher = value.donateByTeacher;
+            donationWritable.projectId = value.projectId;
+            donationWritable.donorCity = value.donorCity;
+            donationWritable.donorState = value.donorState;
+            donationWritable.dollarAmount = value.dollarAmount;
+            donationWritable.total = value.total;
+            donationWritable.support = value.support;
+            donationWritable.donateTimestamp = value.donateTimestamp;
+            topFiveDollar.put(value.dollarAmount, donationWritable);
+            logger.info("map--donation dollar :"+ value);
             //如果集合中包含5个以上的元素，就把集合中的最小值删除
             if (topFiveDollar.size()>5) {
+                logger.info("Remove first key of top 5 dollar:"+topFiveDollar.firstKey());
                 topFiveDollar.remove(topFiveDollar.firstKey());
             }
+            printMap(topFiveDollar);
+
         }
 
         @Override
         protected void cleanup(Context context) throws IOException, InterruptedException {
-            for (DonationWritable donation: topFiveDollar.values()) {
-                context.write(NullWritable.get(), donation);
+            logger.info("print map during cleanup......");
+            printMap(topFiveDollar);
+            for (Map.Entry<Float,DonationWritable> entry: topFiveDollar.entrySet()) {
+                logger.info("output to reduce:"+entry.getValue());
+                context.write(NullWritable.get(), entry.getValue());
             }
         }
     }
@@ -66,16 +88,36 @@ public class TopFiveDollarApp {
         @Override
         protected void reduce(NullWritable key, Iterable<DonationWritable> values, Context context) throws IOException, InterruptedException {
             for (DonationWritable donation:values) {
-                top5Dollar.put(donation.dollarAmount,donation);
+                logger.info("reduce--donation dollar :"+ donation.dollarAmount + ",state:"+donation.donorState+",city:"+donation.donorCity);
+                DonationWritable donationWritable = new DonationWritable();
+                donationWritable.donationId = donation.donationId;
+                donationWritable.donateByTeacher = donation.donateByTeacher;
+                donationWritable.projectId = donation.projectId;
+                donationWritable.donorCity = donation.donorCity;
+                donationWritable.donorState = donation.donorState;
+                donationWritable.dollarAmount = donation.dollarAmount;
+                donationWritable.total = donation.total;
+                donationWritable.support = donation.support;
+                donationWritable.donateTimestamp = donation.donateTimestamp;
+                top5Dollar.put(donation.dollarAmount,donationWritable);
                 //如果集合包含5个以上的元素，就把集合中的最小值删除
-                if (top5Dollar.size()>5) {
+               if (top5Dollar.size()>5) {
                     top5Dollar.remove(top5Dollar.firstKey());
                 }
             }
-            //最后输出top 5的记录
+            printMap(top5Dollar);
             for (DonationWritable donation:top5Dollar.values()) {
                 context.write(NullWritable.get(),donation);
             }
         }
+    }
+    public static <K,V> void printMap(TreeMap<K,V> map) {
+        logger.info("==================");
+        for (Map.Entry<K,V> entry:map.entrySet()) {
+            logger.info("key:"+entry.getKey());
+            logger.info("value"+entry.getValue());
+
+        }
+        logger.info("==================");
     }
 }
